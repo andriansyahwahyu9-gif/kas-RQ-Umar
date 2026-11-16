@@ -1,0 +1,104 @@
+{
+  "entities": {
+    "config": {
+      "title": "Config",
+      "description": "Pengaturan majelis taklim dan kas",
+      "properties": {
+        "namaMajelis": { "type": "string" },
+        "alamatMajelis": { "type": "string" },
+        "namaKetua": { "type": "string" },
+        "namaBendahara": { "type": "string" },
+        "saldoAwal": { "type": "number" },
+        "iuranDefault": { "type": "number" },
+        "periodeIuran": { "type": "string" }
+      },
+      "required": ["namaMajelis", "saldoAwal"]
+    },
+    "transactions": {
+      "title": "Transactions",
+      "description": "Pencatatan transaksi kas",
+      "properties": {
+        "id": { "type": "string" },
+        "tanggal": { "type": "string" },
+        "jenis": { "type": "string" },
+        "kategori": { "type": "string" },
+        "nominal": { "type": "number" },
+        "keterangan": { "type": "string" },
+        "pembayarAtauPenerima": { "type": "string" },
+        "metode": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "tanggal", "jenis", "kategori", "nominal"]
+    },
+    "members": {
+      "title": "Members",
+      "description": "Data anggota pengajian",
+      "properties": {
+        "id": { "type": "string" },
+        "nama": { "type": "string" },
+        "noHp": { "type": "string" },
+        "alamat": { "type": "string" },
+        "tanggalBergabung": { "type": "string" }
+      },
+      "required": ["id", "nama"]
+    },
+    "duesRecords": {
+      "title": "DuesRecords",
+      "description": "Catatan iuran kas anggota",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "memberId": { "type": "string" },
+        "periode": { "type": "string" },
+        "tanggalBayar": { "type": "string" },
+        "nominal": { "type": "number" },
+        "catatan": { "type": "string" }
+      },
+      "required": ["id", "memberId", "periode", "nominal"]
+    },
+    "weeklyDuties": {
+      "title": "WeeklyDuties",
+      "description": "Jadwal tugas pekanan MC, Kultum, dan Khutbah",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "bulan": { "type": "string" },
+        "pekanKe": { "type": "number" },
+        "tanggal": { "type": "string" },
+        "waktu": { "type": "string" },
+        "mc": { "type": "string" },
+        "kultum": { "type": "string" },
+        "temaKultum": { "type": "string" },
+        "khutbah": { "type": "string" },
+        "temaKhutbah": { "type": "string" },
+        "status": { "type": "string", "enum": ["terjadwal", "selesai", "diganti"] },
+        "catatan": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "bulan", "pekanKe", "tanggal", "mc", "kultum", "khutbah", "status"]
+    }
+  },
+  "firestore": {
+    "/config/{configId}": {
+      "schema": { "$ref": "#/entities/config" },
+      "description": "Konfigurasi utama majelis taklim"
+    },
+    "/transactions/{transactionId}": {
+      "schema": { "$ref": "#/entities/transactions" },
+      "description": "Catatan transaksi pemasukan dan pengeluaran kas"
+    },
+    "/members/{memberId}": {
+      "schema": { "$ref": "#/entities/members" },
+      "description": "Daftar anggota majelis taklim"
+    },
+    "/duesRecords/{duesId}": {
+      "schema": { "$ref": "#/entities/duesRecords" },
+      "description": "Catatan pembayaran iuran anggota"
+    },
+    "/weeklyDuties/{dutyId}": {
+      "schema": { "$ref": "#/entities/weeklyDuties" },
+      "description": "Jadwal petugas MC, Kultum, dan Khutbah di setiap pekannya"
+    }
+  }
+}
+

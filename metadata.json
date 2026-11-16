@@ -1,0 +1,6 @@
+{
+  "name": "Buku Kas Pengajian",
+  "description": "Aplikasi pengelolaan pemasukan dan pengeluaran kas majelis taklim dan pengajian secara rapi, akurat, dan mudah dicetak.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
