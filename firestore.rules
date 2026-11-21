@@ -1,8 +1,411 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // Global Safety Net - Default Deny
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
+    }
+
+    // === GLOBAL HELPERS ===
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isOptStr(data, field, maxLen) {
+      return !(field in data) || (data[field] is string && data[field].size() <= maxLen);
+    }
+
+    function isOptBool(data, field) {
+      return !(field in data) || (data[field] is bool);
+    }
+
+    // === ENTITY VALIDATORS ===
+    function isValidConfig(data) {
+      return data.keys().hasAll([
+        'namaMajelis',
+        'alamatMajelis',
+        'namaKetua',
+        'namaBendahara',
+        'saldoAwal',
+        'iuranDefault',
+        'periodeIuran'
+      ]) &&
+      data.keys().hasOnly([
+        'namaMajelis',
+        'alamatMajelis',
+        'namaKetua',
+        'namaBendahara',
+        'saldoAwal',
+        'iuranDefault',
+        'periodeIuran',
+        'isSeeded',
+        'isMembersSeeded',
+        'isWeeklyDutiesSeeded',
+        'isHafalanSeeded'
+      ]) &&
+      data.namaMajelis is string && data.namaMajelis.size() >= 1 && data.namaMajelis.size() <= 200 &&
+      data.alamatMajelis is string && data.alamatMajelis.size() <= 300 &&
+      data.namaKetua is string && data.namaKetua.size() <= 150 &&
+      data.namaBendahara is string && data.namaBendahara.size() <= 150 &&
+      data.saldoAwal is number && data.saldoAwal >= 0 && data.saldoAwal <= 1000000000000 &&
+      data.iuranDefault is number && data.iuranDefault >= 0 && data.iuranDefault <= 1000000000 &&
+      data.periodeIuran in ['Mingguan', 'Bulanan'] &&
+      isOptBool(data, 'isSeeded') &&
+      isOptBool(data, 'isMembersSeeded') &&
+      isOptBool(data, 'isWeeklyDutiesSeeded') &&
+      isOptBool(data, 'isHafalanSeeded');
+    }
+
+    function isValidTransaction(data, docId) {
+      return data.keys().hasAll([
+        'id',
+        'tanggal',
+        'jenis',
+        'kategori',
+        'nominal',
+        'keterangan',
+        'metode',
+        'createdAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id',
+        'tanggal',
+        'jenis',
+        'kategori',
+        'nominal',
+        'keterangan',
+        'pembayarAtauPenerima',
+        'metode',
+        'createdAt'
+      ]) &&
+      data.id is string && data.id == docId &&
+      data.tanggal is string && data.tanggal.size() == 10 &&
+      data.jenis in ['pemasukan', 'pengeluaran'] &&
+      data.kategori is string && data.kategori.size() >= 1 && data.kategori.size() <= 100 &&
+      data.nominal is number && data.nominal >= 0 && data.nominal <= 1000000000000 &&
+      data.keterangan is string && data.keterangan.size() <= 500 &&
+      isOptStr(data, 'pembayarAtauPenerima', 150) &&
+      data.metode in ['Tunai', 'Transfer Bank', 'E-Wallet / QRIS'] &&
+      data.createdAt is number;
+    }
+
+    function isValidMember(data, docId) {
+      return data.keys().hasAll(['id', 'nama', 'tanggalBergabung']) &&
+      data.keys().hasOnly([
+        'id',
+        'kodeAnggota',
+        'nama',
+        'jenisKelamin',
+        'peran',
+        'kelompok',
+        'noHp',
+        'alamat',
+        'tanggalBergabung',
+        'statusAktif',
+        'catatan'
+      ]) &&
+      data.id is string && data.id == docId &&
+      isOptStr(data, 'kodeAnggota', 30) &&
+      data.nama is string && data.nama.size() >= 1 && data.nama.size() <= 150 &&
+      (!('jenisKelamin' in data) || data.jenisKelamin in ['Laki-laki', 'Perempuan']) &&
+      (!('peran' in data) || data.peran in ['Jamaah', 'Pengurus', 'Ustadz / Pengajar', 'Remaja Masjid']) &&
+      isOptStr(data, 'kelompok', 100) &&
+      isOptStr(data, 'noHp', 40) &&
+      isOptStr(data, 'alamat', 300) &&
+      data.tanggalBergabung is string && data.tanggalBergabung.size() <= 30 &&
+      (!('statusAktif' in data) || data.statusAktif in ['aktif', 'nonaktif']) &&
+      isOptStr(data, 'catatan', 500);
+    }
+
+    function isValidDuesRecord(data, docId) {
+      return data.keys().hasAll(['id', 'memberId', 'periode', 'tanggalBayar', 'nominal']) &&
+      data.keys().hasOnly(['id', 'memberId', 'periode', 'tanggalBayar', 'nominal', 'catatan']) &&
+      data.id is string && data.id == docId &&
+      data.memberId is string && data.memberId.size() >= 1 && data.memberId.size() <= 128 &&
+      data.periode is string && data.periode.size() >= 1 && data.periode.size() <= 60 &&
+      data.tanggalBayar is string && data.tanggalBayar.size() <= 30 &&
+      data.nominal is number && data.nominal >= 0 && data.nominal <= 1000000000 &&
+      isOptStr(data, 'catatan', 500);
+    }
+
+    function isValidWeeklyDuty(data, docId) {
+      return data.keys().hasAll([
+        'id',
+        'bulan',
+        'pekanKe',
+        'tanggal',
+        'mc',
+        'kultum',
+        'khutbah',
+        'status',
+        'createdAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id',
+        'bulan',
+        'pekanKe',
+        'tanggal',
+        'waktu',
+        'mc',
+        'kultum',
+        'temaKultum',
+        'khutbah',
+        'temaKhutbah',
+        'status',
+        'catatan',
+        'createdAt'
+      ]) &&
+      data.id is string && data.id == docId &&
+      data.bulan is string && data.bulan.size() == 7 &&
+      data.pekanKe is number && data.pekanKe >= 1 && data.pekanKe <= 5 &&
+      data.tanggal is string && data.tanggal.size() == 10 &&
+      isOptStr(data, 'waktu', 60) &&
+      data.mc is string && data.mc.size() >= 1 && data.mc.size() <= 150 &&
+      data.kultum is string && data.kultum.size() >= 1 && data.kultum.size() <= 150 &&
+      isOptStr(data, 'temaKultum', 250) &&
+      data.khutbah is string && data.khutbah.size() >= 1 && data.khutbah.size() <= 150 &&
+      isOptStr(data, 'temaKhutbah', 250) &&
+      data.status in ['terjadwal', 'selesai', 'diganti'] &&
+      isOptStr(data, 'catatan', 500) &&
+      data.createdAt is number;
+    }
+
+    function isValidHafalanRecord(data, docId) {
+      return data.keys().hasAll([
+        'id',
+        'namaAnggota',
+        'tanggal',
+        'kategori',
+        'surahAtauMateri',
+        'predikat',
+        'statusLulus',
+        'penyimak',
+        'createdAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id',
+        'memberId',
+        'namaAnggota',
+        'tanggal',
+        'kategori',
+        'surahAtauMateri',
+        'juz',
+        'ayatAtauHalaman',
+        'predikat',
+        'statusLulus',
+        'penyimak',
+        'catatan',
+        'createdAt'
+      ]) &&
+      data.id is string && data.id == docId &&
+      isOptStr(data, 'memberId', 128) &&
+      data.namaAnggota is string && data.namaAnggota.size() >= 1 && data.namaAnggota.size() <= 150 &&
+      data.tanggal is string && data.tanggal.size() == 10 &&
+      data.kategori in ["Al-Qur'an", 'Hadits', 'Doa Harian', 'Bacaan Sholat & Dzikir'] &&
+      data.surahAtauMateri is string && data.surahAtauMateri.size() >= 1 && data.surahAtauMateri.size() <= 200 &&
+      isOptStr(data, 'juz', 60) &&
+      isOptStr(data, 'ayatAtauHalaman', 100) &&
+      data.predikat in [
+        'Mumtaz (Sangat Baik)',
+        'Jayyid Jiddan (Baik Sekali)',
+        'Jayyid (Baik)',
+        'Perlu Mengulang'
+      ] &&
+      data.statusLulus in ['lulus', 'proses', 'mengulang'] &&
+      data.penyimak is string && data.penyimak.size() >= 1 && data.penyimak.size() <= 150 &&
+      isOptStr(data, 'catatan', 500) &&
+      data.createdAt is number;
+    }
+
+    function isValidMasterLogin(data, docId) {
+      return data.keys().hasAll([
+        'id',
+        'loginId',
+        'email',
+        'namaLengkap',
+        'peran',
+        'statusAktif',
+        'createdAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id',
+        'uid',
+        'loginId',
+        'email',
+        'namaLengkap',
+        'peran',
+        'statusAktif',
+        'catatan',
+        'createdAt'
+      ]) &&
+      data.id is string && data.id == docId &&
+      isOptStr(data, 'uid', 128) &&
+      data.loginId is string && data.loginId.size() >= 1 && data.loginId.size() <= 150 &&
+      data.email is string && data.email.size() >= 3 && data.email.size() <= 200 &&
+      data.namaLengkap is string && data.namaLengkap.size() >= 1 && data.namaLengkap.size() <= 150 &&
+      data.peran in ['Admin', 'Ketua', 'Bendahara', 'Pengurus'] &&
+      data.statusAktif in ['aktif', 'nonaktif'] &&
+      isOptStr(data, 'catatan', 500) &&
+      data.createdAt is number;
+    }
+
+    // === COLLECTION RULES ===
+    match /test/{docId} {
+      allow get: if isSignedIn() && docId == 'connection';
+    }
+
+    match /config/{configId} {
+      allow get: if isSignedIn() && isValidId(configId);
+      allow create: if isSignedIn() && isValidId(configId) && isValidConfig(incoming());
+      allow update: if isSignedIn() && isValidId(configId) && isValidConfig(incoming()) &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'namaMajelis',
+          'alamatMajelis',
+          'namaKetua',
+          'namaBendahara',
+          'saldoAwal',
+          'iuranDefault',
+          'periodeIuran',
+          'isSeeded',
+          'isMembersSeeded',
+          'isWeeklyDutiesSeeded',
+          'isHafalanSeeded'
+        ]);
+      allow delete: if false;
+    }
+
+    match /transactions/{transactionId} {
+      allow get: if isSignedIn() && isValidId(transactionId);
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(transactionId) && isValidTransaction(incoming(), transactionId);
+      allow update: if isSignedIn() && isValidId(transactionId) && isValidTransaction(incoming(), transactionId) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'tanggal',
+          'jenis',
+          'kategori',
+          'nominal',
+          'keterangan',
+          'pembayarAtauPenerima',
+          'metode'
+        ]);
+      allow delete: if isSignedIn() && isValidId(transactionId);
+    }
+
+    match /members/{memberId} {
+      allow get: if isSignedIn() && isValidId(memberId);
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(memberId) && isValidMember(incoming(), memberId);
+      allow update: if isSignedIn() && isValidId(memberId) && isValidMember(incoming(), memberId) &&
+        incoming().id == existing().id &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'kodeAnggota',
+          'nama',
+          'jenisKelamin',
+          'peran',
+          'kelompok',
+          'noHp',
+          'alamat',
+          'tanggalBergabung',
+          'statusAktif',
+          'catatan'
+        ]);
+      allow delete: if isSignedIn() && isValidId(memberId);
+    }
+
+    match /duesRecords/{duesId} {
+      allow get: if isSignedIn() && isValidId(duesId);
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(duesId) && isValidDuesRecord(incoming(), duesId);
+      allow update: if isSignedIn() && isValidId(duesId) && isValidDuesRecord(incoming(), duesId) &&
+        incoming().id == existing().id &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'memberId',
+          'periode',
+          'tanggalBayar',
+          'nominal',
+          'catatan'
+        ]);
+      allow delete: if isSignedIn() && isValidId(duesId);
+    }
+
+    match /weeklyDuties/{dutyId} {
+      allow get: if isSignedIn() && isValidId(dutyId);
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(dutyId) && isValidWeeklyDuty(incoming(), dutyId);
+      allow update: if isSignedIn() && isValidId(dutyId) && isValidWeeklyDuty(incoming(), dutyId) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'bulan',
+          'pekanKe',
+          'tanggal',
+          'waktu',
+          'mc',
+          'kultum',
+          'temaKultum',
+          'khutbah',
+          'temaKhutbah',
+          'status',
+          'catatan'
+        ]);
+      allow delete: if isSignedIn() && isValidId(dutyId);
+    }
+
+    match /hafalanRecords/{hafalanId} {
+      allow get: if isSignedIn() && isValidId(hafalanId);
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(hafalanId) && isValidHafalanRecord(incoming(), hafalanId);
+      allow update: if isSignedIn() && isValidId(hafalanId) && isValidHafalanRecord(incoming(), hafalanId) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'memberId',
+          'namaAnggota',
+          'tanggal',
+          'kategori',
+          'surahAtauMateri',
+          'juz',
+          'ayatAtauHalaman',
+          'predikat',
+          'statusLulus',
+          'penyimak',
+          'catatan'
+        ]);
+      allow delete: if isSignedIn() && isValidId(hafalanId);
+    }
+
+    match /masterLogins/{loginDocId} {
+      allow get: if isSignedIn() && isValidId(loginDocId);
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(loginDocId) && isValidMasterLogin(incoming(), loginDocId);
+      allow update: if isSignedIn() && isValidId(loginDocId) && isValidMasterLogin(incoming(), loginDocId) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'uid',
+          'loginId',
+          'email',
+          'namaLengkap',
+          'peran',
+          'statusAktif',
+          'catatan'
+        ]);
+      allow delete: if isSignedIn() && isValidId(loginDocId);
     }
   }
 }

@@ -1,4 +1,4 @@
-import { Transaction, Member, PengajianConfig, IncomeCategory, ExpenseCategory, WeeklyDuty } from '../types';
+import { Transaction, Member, PengajianConfig, IncomeCategory, ExpenseCategory, WeeklyDuty, HafalanRecord } from '../types';
 
 export const DEFAULT_CONFIG: PengajianConfig = {
   namaMajelis: 'Majelis Taklim & Pengajian Al-Hidayah',
@@ -30,14 +30,14 @@ export const EXPENSE_CATEGORIES: ExpenseCategory[] = [
 ];
 
 export const INITIAL_MEMBERS: Member[] = [
-  { id: 'm1', nama: 'Ibu Hj. Aminah', noHp: '081234567801', alamat: 'Blok A No. 3', tanggalBergabung: '2025-01-10' },
-  { id: 'm2', nama: 'Ibu Nurhayati', noHp: '081234567802', alamat: 'Blok A No. 12', tanggalBergabung: '2025-01-10' },
-  { id: 'm3', nama: 'Ibu Fatimah', noHp: '081234567803', alamat: 'Blok B No. 05', tanggalBergabung: '2025-01-15' },
-  { id: 'm4', nama: 'Ibu Hj. Maryam', noHp: '081234567804', alamat: 'Blok C No. 08', tanggalBergabung: '2025-02-01' },
-  { id: 'm5', nama: 'Ibu Sri Wahyuni', noHp: '081234567805', alamat: 'Blok C No. 14', tanggalBergabung: '2025-02-10' },
-  { id: 'm6', nama: 'Ibu Kartini', noHp: '081234567806', alamat: 'Blok D No. 02', tanggalBergabung: '2025-03-01' },
-  { id: 'm7', nama: 'Ibu Sutirah', noHp: '081234567807', alamat: 'Blok D No. 11', tanggalBergabung: '2025-03-05' },
-  { id: 'm8', nama: 'Ibu Ratna Dewi', noHp: '081234567808', alamat: 'Blok E No. 01', tanggalBergabung: '2025-04-12' },
+  { id: 'm1', kodeAnggota: 'ANG-001', nama: 'Ibu Hj. Aminah', jenisKelamin: 'Perempuan', peran: 'Pengurus', kelompok: 'Majelis Ibu-Ibu', noHp: '081234567801', alamat: 'Blok A No. 3', tanggalBergabung: '2025-01-10', statusAktif: 'aktif' },
+  { id: 'm2', kodeAnggota: 'ANG-002', nama: 'Ibu Nurhayati', jenisKelamin: 'Perempuan', peran: 'Jamaah', kelompok: 'Majelis Ibu-Ibu', noHp: '081234567802', alamat: 'Blok A No. 12', tanggalBergabung: '2025-01-10', statusAktif: 'aktif' },
+  { id: 'm3', kodeAnggota: 'ANG-003', nama: 'Ibu Fatimah', jenisKelamin: 'Perempuan', peran: 'Jamaah', kelompok: 'Majelis Ibu-Ibu', noHp: '081234567803', alamat: 'Blok B No. 05', tanggalBergabung: '2025-01-15', statusAktif: 'aktif' },
+  { id: 'm4', kodeAnggota: 'ANG-004', nama: 'Ibu Hj. Maryam', jenisKelamin: 'Perempuan', peran: 'Ustadz / Pengajar', kelompok: 'Tahsin & Hafalan', noHp: '081234567804', alamat: 'Blok C No. 08', tanggalBergabung: '2025-02-01', statusAktif: 'aktif' },
+  { id: 'm5', kodeAnggota: 'ANG-005', nama: 'Ibu Sri Wahyuni', jenisKelamin: 'Perempuan', peran: 'Jamaah', kelompok: 'Tahsin & Hafalan', noHp: '081234567805', alamat: 'Blok C No. 14', tanggalBergabung: '2025-02-10', statusAktif: 'aktif' },
+  { id: 'm6', kodeAnggota: 'ANG-006', nama: 'Ibu Kartini', jenisKelamin: 'Perempuan', peran: 'Jamaah', kelompok: 'Majelis Ibu-Ibu', noHp: '081234567806', alamat: 'Blok D No. 02', tanggalBergabung: '2025-03-01', statusAktif: 'aktif' },
+  { id: 'm7', kodeAnggota: 'ANG-007', nama: 'Ibu Sutirah', jenisKelamin: 'Perempuan', peran: 'Jamaah', kelompok: 'Majelis Ibu-Ibu', noHp: '081234567807', alamat: 'Blok D No. 11', tanggalBergabung: '2025-03-05', statusAktif: 'aktif' },
+  { id: 'm8', kodeAnggota: 'ANG-008', nama: 'Ibu Ratna Dewi', jenisKelamin: 'Perempuan', peran: 'Remaja Masjid', kelompok: 'Tahsin & Hafalan', noHp: '081234567808', alamat: 'Blok E No. 01', tanggalBergabung: '2025-04-12', statusAktif: 'aktif' },
 ];
 
 export const INITIAL_TRANSACTIONS: Transaction[] = [
@@ -193,4 +193,98 @@ export const INITIAL_WEEKLY_DUTIES: WeeklyDuty[] = [
     createdAt: Date.now() - 100000000,
   },
 ];
+
+export const INITIAL_HAFALAN: HafalanRecord[] = [
+  {
+    id: 'haf-101',
+    memberId: 'm1',
+    namaAnggota: 'Ibu Hj. Aminah',
+    tanggal: '2026-11-06',
+    kategori: "Al-Qur'an",
+    surahAtauMateri: 'QS. Al-Mulk',
+    juz: 'Juz 29',
+    ayatAtauHalaman: 'Ayat 1 - 15',
+    predikat: 'Mumtaz (Sangat Baik)',
+    statusLulus: 'lulus',
+    penyimak: 'Ust. Muhammad Ridwan, Lc.',
+    catatan: 'Tajwid dan makhraj sudah sangat baik',
+    createdAt: Date.now() - 700000000,
+  },
+  {
+    id: 'haf-102',
+    memberId: 'm2',
+    namaAnggota: 'Ibu Nurhayati',
+    tanggal: '2026-11-06',
+    kategori: "Al-Qur'an",
+    surahAtauMateri: 'QS. An-Naba',
+    juz: 'Juz 30',
+    ayatAtauHalaman: 'Ayat 1 - 40',
+    predikat: 'Jayyid Jiddan (Baik Sekali)',
+    statusLulus: 'lulus',
+    penyimak: 'Ibu Hj. Maryam',
+    catatan: 'Lancar tanpa jeda, lanjut ke QS. An-Naziat',
+    createdAt: Date.now() - 650000000,
+  },
+  {
+    id: 'haf-103',
+    memberId: 'm3',
+    namaAnggota: 'Ibu Fatimah',
+    tanggal: '2026-11-13',
+    kategori: "Al-Qur'an",
+    surahAtauMateri: 'QS. Abasa',
+    juz: 'Juz 30',
+    ayatAtauHalaman: 'Ayat 1 - 24',
+    predikat: 'Jayyid (Baik)',
+    statusLulus: 'proses',
+    penyimak: 'Ibu Hj. Maryam',
+    catatan: 'Melanjutkan ayat 25-42 pada pekan depan',
+    createdAt: Date.now() - 400000000,
+  },
+  {
+    id: 'haf-104',
+    memberId: 'm5',
+    namaAnggota: 'Ibu Sri Wahyuni',
+    tanggal: '2026-11-13',
+    kategori: 'Hadits',
+    surahAtauMateri: 'Hadits Arbain Nawawi #1 (Niat)',
+    juz: '-',
+    ayatAtauHalaman: 'Matan & Arti',
+    predikat: 'Mumtaz (Sangat Baik)',
+    statusLulus: 'lulus',
+    penyimak: 'KH. Abdullah Faqih',
+    catatan: 'Hafal beserta terjemah dan perawi',
+    createdAt: Date.now() - 350000000,
+  },
+  {
+    id: 'haf-105',
+    memberId: 'm6',
+    namaAnggota: 'Ibu Kartini',
+    tanggal: '2026-11-15',
+    kategori: 'Doa Harian',
+    surahAtauMateri: 'Doa Sayyidul Istighfar & Dzikir Pagi',
+    juz: '-',
+    ayatAtauHalaman: 'Lengkap',
+    predikat: 'Perlu Mengulang',
+    statusLulus: 'mengulang',
+    penyimak: 'Ibu Hj. Maryam',
+    catatan: 'Perlu penguatan pada bagian akhir doa',
+    createdAt: Date.now() - 200000000,
+  },
+  {
+    id: 'haf-106',
+    memberId: 'm8',
+    namaAnggota: 'Ibu Ratna Dewi',
+    tanggal: '2026-11-16',
+    kategori: "Al-Qur'an",
+    surahAtauMateri: 'QS. Al-Waqiah',
+    juz: 'Juz 27',
+    ayatAtauHalaman: 'Ayat 1 - 30',
+    predikat: 'Jayyid Jiddan (Baik Sekali)',
+    statusLulus: 'lulus',
+    penyimak: 'Ust. Ahmad Fauzi, M.Ag.',
+    catatan: 'Bacaan tartil dan mad terjaga',
+    createdAt: Date.now() - 100000000,
+  },
+];
+
 

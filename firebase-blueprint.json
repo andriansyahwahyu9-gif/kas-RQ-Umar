@@ -32,13 +32,20 @@
     },
     "members": {
       "title": "Members",
-      "description": "Data anggota pengajian",
+      "description": "Master data anggota pengajian",
+      "type": "object",
       "properties": {
         "id": { "type": "string" },
+        "kodeAnggota": { "type": "string" },
         "nama": { "type": "string" },
+        "jenisKelamin": { "type": "string", "enum": ["Laki-laki", "Perempuan"] },
+        "peran": { "type": "string", "enum": ["Jamaah", "Pengurus", "Ustadz / Pengajar", "Remaja Masjid"] },
+        "kelompok": { "type": "string" },
         "noHp": { "type": "string" },
         "alamat": { "type": "string" },
-        "tanggalBergabung": { "type": "string" }
+        "tanggalBergabung": { "type": "string" },
+        "statusAktif": { "type": "string", "enum": ["aktif", "nonaktif"] },
+        "catatan": { "type": "string" }
       },
       "required": ["id", "nama"]
     },
@@ -76,6 +83,44 @@
         "createdAt": { "type": "number" }
       },
       "required": ["id", "bulan", "pekanKe", "tanggal", "mc", "kultum", "khutbah", "status"]
+    },
+    "hafalanRecords": {
+      "title": "HafalanRecords",
+      "description": "Catatan setoran dan laporan hafalan anggota pengajian",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "memberId": { "type": "string" },
+        "namaAnggota": { "type": "string" },
+        "tanggal": { "type": "string" },
+        "kategori": { "type": "string" },
+        "surahAtauMateri": { "type": "string" },
+        "juz": { "type": "string" },
+        "ayatAtauHalaman": { "type": "string" },
+        "predikat": { "type": "string" },
+        "statusLulus": { "type": "string", "enum": ["lulus", "proses", "mengulang"] },
+        "penyimak": { "type": "string" },
+        "catatan": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "namaAnggota", "tanggal", "kategori", "surahAtauMateri", "predikat", "statusLulus", "penyimak"]
+    },
+    "masterLogins": {
+      "title": "MasterLogins",
+      "description": "Master data akun login pengurus majelis taklim",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "loginId": { "type": "string" },
+        "email": { "type": "string" },
+        "namaLengkap": { "type": "string" },
+        "peran": { "type": "string", "enum": ["Admin", "Ketua", "Bendahara", "Pengurus"] },
+        "statusAktif": { "type": "string", "enum": ["aktif", "nonaktif"] },
+        "catatan": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "loginId", "email", "namaLengkap", "peran", "statusAktif", "createdAt"]
     }
   },
   "firestore": {
@@ -89,7 +134,7 @@
     },
     "/members/{memberId}": {
       "schema": { "$ref": "#/entities/members" },
-      "description": "Daftar anggota majelis taklim"
+      "description": "Master data anggota majelis taklim"
     },
     "/duesRecords/{duesId}": {
       "schema": { "$ref": "#/entities/duesRecords" },
@@ -98,6 +143,14 @@
     "/weeklyDuties/{dutyId}": {
       "schema": { "$ref": "#/entities/weeklyDuties" },
       "description": "Jadwal petugas MC, Kultum, dan Khutbah di setiap pekannya"
+    },
+    "/hafalanRecords/{hafalanId}": {
+      "schema": { "$ref": "#/entities/hafalanRecords" },
+      "description": "Catatan setoran dan laporan hafalan anggota"
+    },
+    "/masterLogins/{loginDocId}": {
+      "schema": { "$ref": "#/entities/masterLogins" },
+      "description": "Master data akun login ID dan hak akses pengurus"
     }
   }
 }

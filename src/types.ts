@@ -31,12 +31,22 @@ export interface Transaction {
   createdAt: number;
 }
 
+export type MemberRole = 'Jamaah' | 'Pengurus' | 'Ustadz / Pengajar' | 'Remaja Masjid';
+export type MemberGender = 'Laki-laki' | 'Perempuan';
+export type MemberActiveStatus = 'aktif' | 'nonaktif';
+
 export interface Member {
   id: string;
+  kodeAnggota?: string;
   nama: string;
+  jenisKelamin?: MemberGender;
+  peran?: MemberRole;
+  kelompok?: string;
   noHp?: string;
   alamat?: string;
   tanggalBergabung: string;
+  statusAktif?: MemberActiveStatus;
+  catatan?: string;
 }
 
 export interface MemberDuesRecord {
@@ -84,3 +94,46 @@ export interface WeeklyDuty {
   createdAt: number;
 }
 
+export type HafalanKategori =
+  | "Al-Qur'an"
+  | 'Hadits'
+  | 'Doa Harian'
+  | 'Bacaan Sholat & Dzikir';
+
+export type HafalanPredikat =
+  | 'Mumtaz (Sangat Baik)'
+  | 'Jayyid Jiddan (Baik Sekali)'
+  | 'Jayyid (Baik)'
+  | 'Perlu Mengulang';
+
+export type HafalanStatus = 'lulus' | 'proses' | 'mengulang';
+
+export interface HafalanRecord {
+  id: string;
+  memberId?: string;
+  namaAnggota: string;
+  tanggal: string; // YYYY-MM-DD
+  kategori: HafalanKategori;
+  surahAtauMateri: string;
+  juz?: string;
+  ayatAtauHalaman?: string;
+  predikat: HafalanPredikat;
+  statusLulus: HafalanStatus;
+  penyimak: string;
+  catatan?: string;
+  createdAt: number;
+}
+
+export type MasterLoginRole = 'Admin' | 'Ketua' | 'Bendahara' | 'Pengurus';
+
+export interface MasterLoginRecord {
+  id: string;
+  uid?: string;
+  loginId: string;
+  email: string;
+  namaLengkap: string;
+  peran: MasterLoginRole;
+  statusAktif: MemberActiveStatus;
+  catatan?: string;
+  createdAt: number;
+}

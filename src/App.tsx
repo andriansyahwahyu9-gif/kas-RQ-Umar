@@ -1,24 +1,54 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { onAuthStateChanged, signOut, User } from 'firebase/auth';
+import { auth, testConnection } from './lib/firebase';
 import { Navbar } from './components/Navbar';
 import { SummaryCards } from './components/SummaryCards';
 import { TransactionTable } from './components/TransactionTable';
 import { TransactionModal } from './components/TransactionModal';
 import { MemberDues } from './components/MemberDues';
+import { MasterMembers } from './components/MasterMembers';
+import { HafalanDashboard } from './components/HafalanDashboard';
 import { AnalyticsCharts } from './components/AnalyticsCharts';
 import { PrintReportView } from './components/PrintReportView';
 import { SettingsModal } from './components/SettingsModal';
 import { WeeklyDutiesDashboard } from './components/WeeklyDutiesDashboard';
+import { LoginScreen } from './components/LoginScreen';
+import { MasterLogin } from './components/MasterLogin';
 
-import { Transaction, Member, MemberDuesRecord, PengajianConfig, TransactionType, WeeklyDuty } from './types';
-import { DEFAULT_CONFIG, INITIAL_MEMBERS, INITIAL_TRANSACTIONS } from './data/initialData';
+import {
+  Transaction,
+  Member,
+  MemberDuesRecord,
+  PengajianConfig,
+  TransactionType,
+  WeeklyDuty,
+  HafalanRecord,
+  MasterLoginRecord,
+} from './types';
+import { DEFAULT_CONFIG } from './data/initialData';
 import { exportDataToJSON, formatRupiah, formatDateIndo } from './utils/formatters';
-import { Plus, Minus, ArrowRight, ShieldCheck, HeartHandshake, BookOpen, Edit3, Trash2, X, Mic, MessageSquareText, CalendarCheck } from 'lucide-react';
+import {
+  Plus,
+  Minus,
+  ArrowRight,
+  ShieldCheck,
+  HeartHandshake,
+  BookOpen,
+  Edit3,
+  Trash2,
+  X,
+  Mic,
+  MessageSquareText,
+  CalendarCheck,
+} from 'lucide-react';
 import {
   subscribeConfig,
   subscribeTransactions,
   subscribeMembers,
   subscribeDuesRecords,
   subscribeWeeklyDuties,
+  subscribeHafalanRecords,
+  subscribeMasterLogins,
   saveConfig,
   saveTransaction,
   deleteTransaction,
@@ -29,11 +59,20 @@ import {
   saveWeeklyDuty,
   saveWeeklyDutiesBatch,
   deleteWeeklyDuty,
+  saveHafalanRecord,
+  deleteHafalanRecord,
+  saveMasterLogin,
+  deleteMasterLogin,
   importAllData,
   resetDataToDefault,
 } from './services/kasService';
 
 export default function App() {
+  // Auth State
+  const [authReady, setAuthReady] = useState<boolean>(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [authNotice, setAuthNotice] = useState<string | null>(null);
+
   // Config State
   const [config, setConfig] = useState<PengajianConfig>(DEFAULT_CONFIG);
 
@@ -49,6 +88,13 @@ export default function App() {
   // Weekly Duties State
   const [weeklyDuties, setWeeklyDuties] = useState<WeeklyDuty[]>([]);
 
+  // Hafalan Records State
+  const [hafalanRecords, setHafalanRecords] = useState<HafalanRecord[]>([]);
+
+  // Master Logins State
+  const [masterLogins, setMasterLogins] = useState<MasterLoginRecord[]>([]);
+  const [masterLoginsLoaded, setMasterLoginsLoaded] = useState<boolean>(false);
+
   // Active Tab
   const [activeTab, setActiveTab] = useState<string>('dashboard');
 
@@ -58,13 +104,40 @@ export default function App() {
   const [editingTrx, setEditingTrx] = useState<Transaction | null>(null);
   const [dashboardDeleteTrx, setDashboardDeleteTrx] = useState<Transaction | null>(null);
 
-  // Subscribe to Realtime Firestore Synchronization
+  // Listen to Firebase Auth state
   useEffect(() => {
+    const unsubAuth = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
+      setAuthReady(true);
+    });
+    return () => unsubAuth();
+  }, []);
+
+  // Subscribe to Realtime Firestore Synchronization ONLY when authenticated
+  useEffect(() => {
+    if (!authReady || !currentUser) {
+      setTransactions([]);
+      setMembers([]);
+      setDuesRecords([]);
+      setWeeklyDuties([]);
+      setHafalanRecords([]);
+      setMasterLogins([]);
+      setMasterLoginsLoaded(false);
+      return;
+    }
+
+    testConnection();
+
     const unsubConfig = subscribeConfig((data) => setConfig(data));
     const unsubTransactions = subscribeTransactions((data) => setTransactions(data));
     const unsubMembers = subscribeMembers((data) => setMembers(data));
     const unsubDues = subscribeDuesRecords((data) => setDuesRecords(data));
     const unsubDuties = subscribeWeeklyDuties((data) => setWeeklyDuties(data));
+    const unsubHafalan = subscribeHafalanRecords((data) => setHafalanRecords(data));
+    const unsubMasterLogins = subscribeMasterLogins((data) => {
+      setMasterLogins(data);
+      setMasterLoginsLoaded(true);
+    });
 
     return () => {
       unsubConfig();
@@ -72,8 +145,52 @@ export default function App() {
       unsubMembers();
       unsubDues();
       unsubDuties();
+      unsubHafalan();
+      unsubMasterLogins();
     };
-  }, []);
+  }, [authReady, currentUser]);
+
+  // Enforce active Master Login status & auto-register signed-in user in Master Login
+  useEffect(() => {
+    if (!authReady || !currentUser || !masterLoginsLoaded) return;
+
+    const userEmail = (currentUser.email || '').toLowerCase();
+    const matched = masterLogins.find(
+      (l) =>
+        (l.uid && l.uid === currentUser.uid) ||
+        (userEmail && l.email.toLowerCase() === userEmail)
+    );
+
+    if (matched) {
+      if (matched.statusAktif === 'nonaktif') {
+        setAuthNotice(
+          'Akun Anda berstatus Non-Aktif pada Master Login. Silakan hubungi Admin/Ketua Majelis.'
+        );
+        signOut(auth);
+      } else {
+        setAuthNotice(null);
+      }
+      return;
+    }
+
+    const derivedLoginId = userEmail.endsWith('@kas-pengajian.app')
+      ? userEmail.replace('@kas-pengajian.app', '')
+      : currentUser.email || currentUser.uid;
+
+    const autoRecord: MasterLoginRecord = {
+      id: `login-${currentUser.uid}`,
+      uid: currentUser.uid,
+      loginId: derivedLoginId,
+      email: currentUser.email || `${currentUser.uid}@kas-pengajian.app`,
+      namaLengkap: currentUser.displayName || derivedLoginId,
+      peran: masterLogins.length === 0 ? 'Admin' : 'Pengurus',
+      statusAktif: 'aktif',
+      createdAt: Date.now(),
+    };
+    saveMasterLogin(autoRecord).catch((err) =>
+      console.error('Auto-register master login failed:', err)
+    );
+  }, [authReady, currentUser, masterLoginsLoaded, masterLogins]);
 
   // Calculations
   const totalIncome = useMemo(() => {
@@ -186,6 +303,29 @@ export default function App() {
     await deleteWeeklyDuty(id);
   };
 
+  // Hafalan Handlers
+  const handleSaveHafalanRecord = async (record: HafalanRecord) => {
+    await saveHafalanRecord(record);
+  };
+
+  const handleDeleteHafalanRecord = async (id: string) => {
+    await deleteHafalanRecord(id);
+  };
+
+  // Master Login Handlers
+  const handleSaveMasterLogin = async (record: MasterLoginRecord) => {
+    await saveMasterLogin(record);
+  };
+
+  const handleDeleteMasterLogin = async (id: string) => {
+    await deleteMasterLogin(id);
+  };
+
+  const handleSignOut = async () => {
+    setAuthNotice(null);
+    await signOut(auth);
+  };
+
   // Upcoming or latest weekly duty for Dashboard preview
   const nextWeeklyDuty = useMemo(() => {
     if (weeklyDuties.length === 0) return null;
@@ -201,13 +341,14 @@ export default function App() {
   // Backup/Restore
   const handleExportAll = () => {
     const backupObj = {
-      version: '1.1',
+      version: '1.2',
       exportedAt: new Date().toISOString(),
       config,
       transactions,
       members,
       duesRecords,
       weeklyDuties,
+      hafalanRecords,
     };
     exportDataToJSON(backupObj, `Backup_Kas_Pengajian_${new Date().toISOString().slice(0, 10)}.json`);
   };
@@ -220,14 +361,30 @@ export default function App() {
     await resetDataToDefault();
   };
 
+  if (!authReady) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center p-6">
+        <div className="bg-white rounded-2xl px-8 py-6 shadow-sm border border-slate-200 text-center space-y-2">
+          <div className="w-9 h-9 rounded-full border-2 border-emerald-700 border-t-transparent animate-spin mx-auto" />
+          <p className="text-xs font-semibold text-slate-600">Memuat sesi pengguna...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return <LoginScreen authNotice={authNotice} />;
+  }
+
   return (
     <div className="min-h-screen bg-slate-100/70 text-slate-900 flex flex-col font-sans antialiased">
-      
       {/* Navigation Bar */}
       <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         config={config}
+        user={currentUser}
+        onSignOut={handleSignOut}
         onOpenIncomeModal={handleOpenIncomeModal}
         onOpenExpenseModal={handleOpenExpenseModal}
       />
@@ -335,10 +492,18 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm space-y-3 text-xs">
+                <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm space-y-2.5 text-xs">
                   <h4 className="font-bold text-slate-900 font-serif border-b border-slate-100 pb-2">
                     Akses Cepat Fitur
                   </h4>
+
+                  <button
+                    onClick={() => setActiveTab('master-members')}
+                    className="w-full text-left p-2.5 rounded-xl bg-slate-50 hover:bg-emerald-50 text-slate-800 hover:text-emerald-900 font-medium transition-colors flex items-center justify-between cursor-pointer"
+                  >
+                    <span>Master Data Anggota Pengajian</span>
+                    <ArrowRight className="w-4 h-4 text-slate-400" />
+                  </button>
 
                   <button
                     onClick={() => setActiveTab('members')}
@@ -357,18 +522,26 @@ export default function App() {
                   </button>
 
                   <button
-                    onClick={() => setActiveTab('report')}
+                    onClick={() => setActiveTab('hafalan')}
                     className="w-full text-left p-2.5 rounded-xl bg-slate-50 hover:bg-emerald-50 text-slate-800 hover:text-emerald-900 font-medium transition-colors flex items-center justify-between cursor-pointer"
                   >
-                    <span>Cetak Laporan Keuangan PDF</span>
+                    <span>Catat & Pantau Laporan Hafalan</span>
                     <ArrowRight className="w-4 h-4 text-slate-400" />
                   </button>
 
                   <button
-                    onClick={() => setActiveTab('analytics')}
+                    onClick={() => setActiveTab('report')}
                     className="w-full text-left p-2.5 rounded-xl bg-slate-50 hover:bg-emerald-50 text-slate-800 hover:text-emerald-900 font-medium transition-colors flex items-center justify-between cursor-pointer"
                   >
-                    <span>Grafik Perbandingan Pemasukan</span>
+                    <span>Cetak Laporan (Kas, Rekap, Hafalan, Tugas)</span>
+                    <ArrowRight className="w-4 h-4 text-slate-400" />
+                  </button>
+
+                  <button
+                    onClick={() => setActiveTab('master-login')}
+                    className="w-full text-left p-2.5 rounded-xl bg-slate-50 hover:bg-emerald-50 text-slate-800 hover:text-emerald-900 font-medium transition-colors flex items-center justify-between cursor-pointer"
+                  >
+                    <span>Kelola Master Data Login</span>
                     <ArrowRight className="w-4 h-4 text-slate-400" />
                   </button>
                 </div>
@@ -460,6 +633,16 @@ export default function App() {
           />
         )}
 
+        {/* Master Data Anggota Tab */}
+        {activeTab === 'master-members' && (
+          <MasterMembers
+            members={members}
+            onAddMember={handleAddMember}
+            onEditMember={handleEditMember}
+            onDeleteMember={handleDeleteMember}
+          />
+        )}
+
         {/* Member Dues Tab */}
         {activeTab === 'members' && (
           <MemberDues
@@ -485,6 +668,16 @@ export default function App() {
           />
         )}
 
+        {/* Hafalan Tab */}
+        {activeTab === 'hafalan' && (
+          <HafalanDashboard
+            records={hafalanRecords}
+            members={members}
+            onSaveRecord={handleSaveHafalanRecord}
+            onDeleteRecord={handleDeleteHafalanRecord}
+          />
+        )}
+
         {/* Analytics Tab */}
         {activeTab === 'analytics' && (
           <AnalyticsCharts
@@ -498,6 +691,21 @@ export default function App() {
           <PrintReportView
             transactions={transactions}
             config={config}
+            members={members}
+            duesRecords={duesRecords}
+            weeklyDuties={weeklyDuties}
+            hafalanRecords={hafalanRecords}
+          />
+        )}
+
+        {/* Master Login Tab */}
+        {activeTab === 'master-login' && (
+          <MasterLogin
+            logins={masterLogins}
+            currentUserEmail={currentUser.email}
+            currentUserUid={currentUser.uid}
+            onSaveLogin={handleSaveMasterLogin}
+            onDeleteLogin={handleDeleteMasterLogin}
           />
         )}
 
