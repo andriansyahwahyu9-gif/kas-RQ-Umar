@@ -1,15 +1,25 @@
-import { 
-  doc, 
-  collection, 
-  onSnapshot, 
-  setDoc, 
-  deleteDoc, 
-  getDoc, 
+import {
+  doc,
+  collection,
+  onSnapshot,
+  setDoc,
+  deleteDoc,
+  getDoc,
   getDocs,
   writeBatch
 } from 'firebase/firestore';
-import { db, auth } from '../lib/firebase';
-import { Transaction, Member, MemberDuesRecord, PengajianConfig, WeeklyDuty, HafalanRecord, MasterLoginRecord } from '../types';
+import { db } from '../lib/firebase';
+import { generateSaltHex, hashPasswordPBKDF2, verifyPasswordPBKDF2 } from '../lib/passwordCrypto';
+import {
+  Transaction,
+  Member,
+  MemberDuesRecord,
+  PengajianConfig,
+  WeeklyDuty,
+  HafalanRecord,
+  MasterLoginRecord,
+  AppSessionUser,
+} from '../types';
 import { DEFAULT_CONFIG, INITIAL_MEMBERS, INITIAL_TRANSACTIONS, INITIAL_WEEKLY_DUTIES, INITIAL_HAFALAN } from '../data/initialData';
 
 const CONFIG_DOC_PATH = 'main';
@@ -26,18 +36,6 @@ enum OperationType {
 function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
   const errInfo = {
     error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo:
-        auth.currentUser?.providerData?.map((provider) => ({
-          providerId: provider.providerId,
-          email: provider.email,
-        })) || [],
-    },
     operationType,
     path,
   };
@@ -480,21 +478,196 @@ export async function deleteHafalanRecord(id: string) {
   }
 }
 
-export async function saveMasterLogin(record: MasterLoginRecord) {
+export function normalizeLoginId(rawId: string): string {
+  const clean = rawId.trim().toLowerCase();
+  if (!clean || clean.includes('@') || clean === '.' || clean === '..') return '';
+  if (!/^[a-z0-9._-]{2,50}$/.test(clean)) return '';
+  return clean;
+}
+
+export async function checkHasPasswordAccount(): Promise<boolean> {
   try {
-    const docRef = doc(db, 'masterLogins', record.id);
-    await setDoc(docRef, stripUndefined(record));
+    const snap = await getDocs(collection(db, 'masterLogins'));
+    return snap.docs.some((d) => {
+      const data = d.data();
+      return data?.hasPassword === true && data?.statusAktif === 'aktif';
+    });
   } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, 'masterLogins');
+    return true;
+  }
+}
+
+export async function createFirstAdminAccount(params: {
+  loginId: string;
+  namaLengkap: string;
+  password: string;
+}): Promise<AppSessionUser> {
+  const alreadyConfigured = await checkHasPasswordAccount();
+  if (alreadyConfigured) {
+    throw new Error('Akun Admin sudah terdaftar. Silakan masuk menggunakan ID Login dan Password.');
+  }
+
+  const loginIdKey = normalizeLoginId(params.loginId);
+  if (!loginIdKey) {
+    throw new Error(
+      'ID Login tidak valid. Gunakan 2–50 karakter huruf, angka, titik (.), garis bawah (_), atau tanda hubung (-) tanpa spasi atau email.'
+    );
+  }
+  if (!params.namaLengkap.trim()) {
+    throw new Error('Nama lengkap Admin wajib diisi.');
+  }
+  if (params.password.length < 6) {
+    throw new Error('Password minimal harus 6 karakter.');
+  }
+
+  const now = Date.now();
+  const loginDocId = `login-${now}`;
+  const salt = generateSaltHex();
+  const hash = await hashPasswordPBKDF2(params.password, salt);
+
+  const profile: MasterLoginRecord = {
+    id: loginDocId,
+    loginId: params.loginId.trim(),
+    namaLengkap: params.namaLengkap.trim(),
+    peran: 'Admin',
+    statusAktif: 'aktif',
+    hasPassword: true,
+    catatan: 'Akun Admin utama',
+    createdAt: now,
+  };
+
+  try {
+    const batch = writeBatch(db);
+    batch.set(doc(db, 'masterLogins', loginDocId), stripUndefined(profile));
+    batch.set(doc(db, 'loginCredentials', loginIdKey), {
+      id: loginIdKey,
+      loginDocId,
+      loginId: params.loginId.trim(),
+      passwordHash: hash,
+      passwordSalt: salt,
+      updatedAt: now,
+    });
+    await batch.commit();
+
+    return {
+      id: profile.id,
+      loginId: profile.loginId,
+      namaLengkap: profile.namaLengkap,
+      peran: profile.peran,
+    };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `masterLogins/${loginDocId}`);
+    throw error;
+  }
+}
+
+export async function authenticateWithIdPassword(
+  rawLoginId: string,
+  password: string
+): Promise<AppSessionUser> {
+  if (rawLoginId.includes('@')) {
+    throw new Error('Login tidak menggunakan email. Masukkan ID Login yang dibuat oleh Admin.');
+  }
+
+  const loginIdKey = normalizeLoginId(rawLoginId);
+  if (!loginIdKey) {
+    throw new Error('Format ID Login tidak valid.');
+  }
+
+  const credSnap = await getDoc(doc(db, 'loginCredentials', loginIdKey));
+  if (!credSnap.exists()) {
+    throw new Error('ID Login atau Password salah. Pastikan akun telah dibuat oleh Admin.');
+  }
+
+  const cred = credSnap.data() as {
+    loginDocId: string;
+    passwordHash: string;
+    passwordSalt: string;
+  };
+
+  const isPasswordValid = await verifyPasswordPBKDF2(
+    password,
+    cred.passwordSalt,
+    cred.passwordHash
+  );
+  if (!isPasswordValid) {
+    throw new Error('ID Login atau Password salah.');
+  }
+
+  const profileSnap = await getDoc(doc(db, 'masterLogins', cred.loginDocId));
+  if (!profileSnap.exists()) {
+    throw new Error('Data akun tidak ditemukan di Master Login. Hubungi Admin Majelis.');
+  }
+
+  const profile = profileSnap.data() as MasterLoginRecord;
+  if (profile.statusAktif === 'nonaktif') {
+    throw new Error('Akun Anda berstatus Non-Aktif. Silakan hubungi Admin Majelis.');
+  }
+
+  return {
+    id: profile.id,
+    loginId: profile.loginId,
+    namaLengkap: profile.namaLengkap,
+    peran: profile.peran,
+  };
+}
+
+export async function saveMasterLogin(record: MasterLoginRecord, newPassword?: string) {
+  try {
+    const cleanRecord: MasterLoginRecord = {
+      id: record.id,
+      loginId: record.loginId.trim(),
+      namaLengkap: record.namaLengkap.trim(),
+      peran: record.peran,
+      statusAktif: record.statusAktif,
+      hasPassword: newPassword ? true : Boolean(record.hasPassword),
+      catatan: record.catatan?.trim() || undefined,
+      createdAt: record.createdAt,
+    };
+
+    const docRef = doc(db, 'masterLogins', cleanRecord.id);
+
+    if (newPassword && newPassword.length >= 6) {
+      const loginIdKey = normalizeLoginId(cleanRecord.loginId);
+      if (!loginIdKey) {
+        throw new Error('ID Login tidak valid untuk penyimpanan kredensial.');
+      }
+      const salt = generateSaltHex();
+      const hash = await hashPasswordPBKDF2(newPassword, salt);
+      const batch = writeBatch(db);
+      batch.set(docRef, stripUndefined(cleanRecord));
+      batch.set(doc(db, 'loginCredentials', loginIdKey), {
+        id: loginIdKey,
+        loginDocId: cleanRecord.id,
+        loginId: cleanRecord.loginId,
+        passwordHash: hash,
+        passwordSalt: salt,
+        updatedAt: Date.now(),
+      });
+      await batch.commit();
+    } else {
+      await setDoc(docRef, stripUndefined(cleanRecord));
+    }
+  } catch (error) {
+    if (error instanceof Error && !error.message.startsWith('{')) {
+      throw error;
+    }
     handleFirestoreError(error, OperationType.WRITE, `masterLogins/${record.id}`);
   }
 }
 
-export async function deleteMasterLogin(id: string) {
+export async function deleteMasterLogin(record: MasterLoginRecord) {
   try {
-    const docRef = doc(db, 'masterLogins', id);
-    await deleteDoc(docRef);
+    const batch = writeBatch(db);
+    batch.delete(doc(db, 'masterLogins', record.id));
+    const loginIdKey = normalizeLoginId(record.loginId);
+    if (loginIdKey) {
+      batch.delete(doc(db, 'loginCredentials', loginIdKey));
+    }
+    await batch.commit();
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, `masterLogins/${id}`);
+    handleFirestoreError(error, OperationType.DELETE, `masterLogins/${record.id}`);
   }
 }
 

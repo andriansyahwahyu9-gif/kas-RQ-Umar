@@ -6,6 +6,7 @@ import {
   Eye,
   EyeOff,
   KeyRound,
+  Lock,
   Plus,
   RotateCcw,
   Search,
@@ -14,24 +15,27 @@ import {
   UserX,
   X,
 } from 'lucide-react';
-import { MasterLoginRecord, MasterLoginRole, MemberActiveStatus } from '../types';
-import { buildLoginEmail, createMasterAuthUser } from '../lib/firebase';
+import {
+  AppSessionUser,
+  MasterLoginRecord,
+  MasterLoginRole,
+  MemberActiveStatus,
+} from '../types';
+import { normalizeLoginId } from '../services/kasService';
 import { formatDateIndo } from '../utils/formatters';
 
 interface MasterLoginProps {
   logins: MasterLoginRecord[];
-  currentUserEmail: string | null;
-  currentUserUid: string;
-  onSaveLogin: (record: MasterLoginRecord) => Promise<void> | void;
-  onDeleteLogin: (id: string) => Promise<void> | void;
+  currentUser: AppSessionUser;
+  onSaveLogin: (record: MasterLoginRecord, newPassword?: string) => Promise<void> | void;
+  onDeleteLogin: (record: MasterLoginRecord) => Promise<void> | void;
 }
 
 const ROLES: MasterLoginRole[] = ['Admin', 'Ketua', 'Bendahara', 'Pengurus'];
 
 export const MasterLogin: React.FC<MasterLoginProps> = ({
   logins,
-  currentUserEmail,
-  currentUserUid,
+  currentUser,
   onSaveLogin,
   onDeleteLogin,
 }) => {
@@ -52,6 +56,9 @@ export const MasterLogin: React.FC<MasterLoginProps> = ({
   const [formCatatan, setFormCatatan] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  const isAdminUser = currentUser.peran === 'Admin';
 
   const stats = useMemo(() => {
     const total = logins.length;
@@ -71,7 +78,6 @@ export const MasterLogin: React.FC<MasterLoginProps> = ({
       if (!q) return true;
       return (
         l.loginId.toLowerCase().includes(q) ||
-        l.email.toLowerCase().includes(q) ||
         l.namaLengkap.toLowerCase().includes(q) ||
         l.peran.toLowerCase().includes(q)
       );
@@ -88,6 +94,7 @@ export const MasterLogin: React.FC<MasterLoginProps> = ({
   };
 
   const openAddModal = () => {
+    if (!isAdminUser) return;
     setEditingRecord(null);
     setFormLoginId('');
     setFormPassword('');
@@ -101,9 +108,11 @@ export const MasterLogin: React.FC<MasterLoginProps> = ({
   };
 
   const openEditModal = (record: MasterLoginRecord) => {
+    if (!isAdminUser) return;
     setEditingRecord(record);
     setFormLoginId(record.loginId);
     setFormPassword('');
+    setShowPassword(false);
     setFormNama(record.namaLengkap);
     setFormPeran(record.peran);
     setFormStatus(record.statusAktif);
@@ -113,10 +122,11 @@ export const MasterLogin: React.FC<MasterLoginProps> = ({
   };
 
   const isCurrentUserRecord = (record: MasterLoginRecord) =>
-    (record.uid && record.uid === currentUserUid) ||
-    (currentUserEmail && record.email.toLowerCase() === currentUserEmail.toLowerCase());
+    record.id === currentUser.id ||
+    record.loginId.trim().toLowerCase() === currentUser.loginId.trim().toLowerCase();
 
   const handleToggleStatus = async (record: MasterLoginRecord) => {
+    if (!isAdminUser) return;
     if (isCurrentUserRecord(record) && record.statusAktif === 'aktif') {
       return;
     }
@@ -126,6 +136,7 @@ export const MasterLogin: React.FC<MasterLoginProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isAdminUser) return;
     setFormError(null);
 
     if (!formNama.trim()) {
@@ -134,16 +145,29 @@ export const MasterLogin: React.FC<MasterLoginProps> = ({
     }
 
     if (editingRecord) {
+      if (formPassword && formPassword.length < 6) {
+        setFormError('Password baru minimal harus 6 karakter.');
+        return;
+      }
+
       setIsSaving(true);
       try {
-        await onSaveLogin({
-          ...editingRecord,
-          namaLengkap: formNama.trim(),
-          peran: formPeran,
-          statusAktif: isCurrentUserRecord(editingRecord) ? 'aktif' : formStatus,
-          catatan: formCatatan.trim() || undefined,
-        });
+        await onSaveLogin(
+          {
+            ...editingRecord,
+            namaLengkap: formNama.trim(),
+            peran: isCurrentUserRecord(editingRecord) ? 'Admin' : formPeran,
+            statusAktif: isCurrentUserRecord(editingRecord) ? 'aktif' : formStatus,
+            catatan: formCatatan.trim() || undefined,
+          },
+          formPassword || undefined
+        );
         setIsModalOpen(false);
+        setSuccessMsg(
+          formPassword
+            ? `Data dan password akun "${editingRecord.loginId}" berhasil diperbarui.`
+            : `Data akun "${editingRecord.loginId}" berhasil diperbarui.`
+        );
       } catch (err: any) {
         setFormError(err?.message || 'Gagal menyimpan perubahan akun.');
       } finally {
@@ -152,58 +176,49 @@ export const MasterLogin: React.FC<MasterLoginProps> = ({
       return;
     }
 
-    // Creating new login account
-    const resolvedEmail = buildLoginEmail(formLoginId);
-    if (!resolvedEmail) {
-      setFormError('ID Login tidak valid. Gunakan huruf, angka, titik, atau email.');
+    // Create new ID & Password account (strictly without email)
+    if (formLoginId.includes('@')) {
+      setFormError('ID Login tidak menggunakan email. Cukup masukkan ID singkat, contoh: bendahara.');
+      return;
+    }
+
+    const normalizedKey = normalizeLoginId(formLoginId);
+    if (!normalizedKey) {
+      setFormError(
+        'ID Login tidak valid. Gunakan 2–50 karakter huruf, angka, titik (.), garis bawah (_), atau tanda hubung (-) tanpa spasi.'
+      );
       return;
     }
     if (formPassword.length < 6) {
       setFormError('Password minimal harus 6 karakter.');
       return;
     }
+
     const duplicate = logins.some(
-      (l) =>
-        l.email.toLowerCase() === resolvedEmail.toLowerCase() ||
-        l.loginId.toLowerCase() === formLoginId.trim().toLowerCase()
+      (l) => normalizeLoginId(l.loginId) === normalizedKey || l.loginId.trim().toLowerCase() === normalizedKey
     );
     if (duplicate) {
-      setFormError('ID Login / Email tersebut sudah terdaftar di Master Login.');
+      setFormError('ID Login tersebut sudah terdaftar di Master Login.');
       return;
     }
 
     setIsSaving(true);
     try {
-      const createdUid = await createMasterAuthUser(resolvedEmail, formPassword, formNama.trim());
       const newRecord: MasterLoginRecord = {
         id: `login-${Date.now()}`,
-        uid: createdUid,
         loginId: formLoginId.trim(),
-        email: resolvedEmail,
         namaLengkap: formNama.trim(),
         peran: formPeran,
         statusAktif: formStatus,
+        hasPassword: true,
         catatan: formCatatan.trim() || undefined,
         createdAt: Date.now(),
       };
-      await onSaveLogin(newRecord);
+      await onSaveLogin(newRecord, formPassword);
       setIsModalOpen(false);
+      setSuccessMsg(`Akun login "${formLoginId.trim()}" berhasil dibuat dan siap digunakan.`);
     } catch (err: any) {
-      const code = err?.code || '';
-      if (code === 'auth/operation-not-allowed') {
-        setFormError(
-          'Provider Email/Password belum diaktifkan di Firebase Console > Authentication > Sign-in method. Aktifkan terlebih dahulu agar dapat membuat ID & Password.'
-        );
-      } else if (code === 'auth/email-already-in-use') {
-        setFormError('ID Login / Email sudah digunakan pada Firebase Authentication.');
-      } else if (code === 'auth/weak-password') {
-        setFormError('Password terlalu lemah (minimal 6 karakter).');
-      } else if (code === 'auth/invalid-email') {
-        setFormError('Format ID Login / Email tidak valid.');
-      } else {
-        setFormError('Gagal membuat akun login baru. Silakan coba kembali.');
-      }
-      console.error('Create Master Login error:', err);
+      setFormError(err?.message || 'Gagal membuat akun login baru.');
     } finally {
       setIsSaving(false);
     }
@@ -219,18 +234,45 @@ export const MasterLogin: React.FC<MasterLoginProps> = ({
             <span>Master Data Login Pengurus</span>
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Kelola ID Login, password, peran hak akses, serta status aktif akun pengurus yang dapat masuk ke sistem
+            Kelola ID Login dan Password pengurus untuk masuk ke aplikasi (tanpa email)
           </p>
         </div>
 
-        <button
-          onClick={openAddModal}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white font-semibold text-xs transition-colors shadow-xs cursor-pointer whitespace-nowrap shrink-0 self-start lg:self-auto"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Tambah Akun Login</span>
-        </button>
+        {isAdminUser && (
+          <button
+            onClick={openAddModal}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white font-semibold text-xs transition-colors shadow-xs cursor-pointer whitespace-nowrap shrink-0 self-start lg:self-auto"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Tambah Akun Login</span>
+          </button>
+        )}
       </div>
+
+      {!isAdminUser && (
+        <div className="rounded-2xl p-4 border bg-amber-50 border-amber-200 text-amber-900 text-xs flex items-start gap-2.5">
+          <Lock className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+          <span>
+            Anda masuk dengan peran <strong>{currentUser.peran}</strong>. Penambahan, perubahan password, dan penghapusan akun login hanya dapat dilakukan oleh akun <strong>Admin</strong>.
+          </span>
+        </div>
+      )}
+
+      {successMsg && (
+        <div className="rounded-2xl p-4 border bg-emerald-50 border-emerald-200 text-emerald-900 text-xs flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span className="font-medium">{successMsg}</span>
+          </div>
+          <button
+            onClick={() => setSuccessMsg(null)}
+            className="p-1 rounded-lg hover:bg-emerald-100 cursor-pointer"
+            aria-label="Tutup pemberitahuan"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* KPI Strip */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -270,7 +312,7 @@ export const MasterLogin: React.FC<MasterLoginProps> = ({
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
-              placeholder="Cari ID Login, email, nama pengurus, atau peran..."
+              placeholder="Cari ID Login, nama pengurus, atau peran..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600"
@@ -345,7 +387,7 @@ export const MasterLogin: React.FC<MasterLoginProps> = ({
               <RotateCcw className="w-3.5 h-3.5" />
               <span>Reset Filter</span>
             </button>
-          ) : (
+          ) : isAdminUser ? (
             <button
               onClick={openAddModal}
               className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-800 text-white font-semibold text-xs cursor-pointer"
@@ -353,7 +395,7 @@ export const MasterLogin: React.FC<MasterLoginProps> = ({
               <Plus className="w-3.5 h-3.5" />
               <span>Tambah Akun Login Pertama</span>
             </button>
-          )}
+          ) : null}
         </div>
       ) : (
         <div className="bg-white rounded-2xl shadow-xs border border-slate-200/80 overflow-hidden">
@@ -363,17 +405,19 @@ export const MasterLogin: React.FC<MasterLoginProps> = ({
                 <tr>
                   <th className="py-3 px-4 w-12 text-center">No</th>
                   <th className="py-3 px-4">ID Login</th>
-                  <th className="py-3 px-4">Nama Lengkap &amp; Email</th>
+                  <th className="py-3 px-4">Nama Lengkap</th>
                   <th className="py-3 px-4">Peran</th>
+                  <th className="py-3 px-4 text-center">Kredensial</th>
                   <th className="py-3 px-4 text-center">Terdaftar</th>
                   <th className="py-3 px-4 text-center">Status</th>
-                  <th className="py-3 px-4 text-center">Aksi</th>
+                  {isAdminUser && <th className="py-3 px-4 text-center">Aksi</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium">
                 {filteredLogins.map((item, idx) => {
                   const isSelf = isCurrentUserRecord(item);
                   const isAktif = item.statusAktif === 'aktif';
+                  const hasPwd = item.hasPassword === true;
                   return (
                     <tr key={item.id} className="hover:bg-slate-50/80 transition-colors">
                       <td className="py-3.5 px-4 text-center text-slate-400 font-bold tabular-nums">
@@ -382,14 +426,13 @@ export const MasterLogin: React.FC<MasterLoginProps> = ({
                       <td className="py-3.5 px-4">
                         <div className="font-mono font-bold text-slate-900">{item.loginId}</div>
                         {isSelf && (
-                          <span className="text-[10px] font-semibold text-emerald-700">
+                          <span className="text-[10px] font-semibold text-emerald-700 block">
                             Akun sedang digunakan
                           </span>
                         )}
                       </td>
                       <td className="py-3.5 px-4">
                         <div className="font-bold text-slate-900">{item.namaLengkap}</div>
-                        <div className="text-[11px] text-slate-500">{item.email}</div>
                         {item.catatan && (
                           <div className="text-[11px] text-slate-400 italic mt-0.5 max-w-xs truncate">
                             {item.catatan}
@@ -402,21 +445,37 @@ export const MasterLogin: React.FC<MasterLoginProps> = ({
                           <span>{item.peran}</span>
                         </span>
                       </td>
+                      <td className="py-3.5 px-4 text-center">
+                        <span
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-semibold whitespace-nowrap ${
+                            hasPwd
+                              ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                              : 'bg-amber-50 text-amber-800 border border-amber-200'
+                          }`}
+                        >
+                          <KeyRound className="w-3 h-3" />
+                          <span>{hasPwd ? 'Password Aktif' : 'Belum Diatur'}</span>
+                        </span>
+                      </td>
                       <td className="py-3.5 px-4 text-center text-slate-500 tabular-nums whitespace-nowrap">
                         {formatDateIndo(new Date(item.createdAt).toISOString().slice(0, 10))}
                       </td>
                       <td className="py-3.5 px-4 text-center">
                         <button
                           onClick={() => handleToggleStatus(item)}
-                          disabled={Boolean(isSelf && isAktif)}
+                          disabled={!isAdminUser || Boolean(isSelf && isAktif)}
                           title={
-                            isSelf
+                            !isAdminUser
+                              ? 'Hanya Admin yang dapat mengubah status'
+                              : isSelf
                               ? 'Akun Anda sendiri tidak dapat dinonaktifkan'
                               : 'Klik untuk ubah status aktif/nonaktif'
                           }
                           className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold whitespace-nowrap ${
-                            isSelf
-                              ? 'bg-emerald-50 text-emerald-800 border border-emerald-200 cursor-default'
+                            !isAdminUser || isSelf
+                              ? isAktif
+                                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200 cursor-default'
+                                : 'bg-slate-100 text-slate-600 border border-slate-200 cursor-default'
                               : isAktif
                               ? 'bg-emerald-50 text-emerald-800 border border-emerald-200 cursor-pointer'
                               : 'bg-slate-100 text-slate-600 border border-slate-200 cursor-pointer'
@@ -430,25 +489,27 @@ export const MasterLogin: React.FC<MasterLoginProps> = ({
                           <span>{isAktif ? 'Aktif' : 'Non-Aktif'}</span>
                         </button>
                       </td>
-                      <td className="py-3.5 px-4 text-center">
-                        <div className="flex items-center justify-center gap-1.5">
-                          <button
-                            onClick={() => openEditModal(item)}
-                            className="p-1.5 rounded-lg text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 cursor-pointer"
-                            title="Edit Akun Login"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => setDeleteTarget(item)}
-                            disabled={Boolean(isSelf)}
-                            className="p-1.5 rounded-lg text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                            title={isSelf ? 'Tidak dapat menghapus akun yang sedang aktif' : 'Hapus dari Master Login'}
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
+                      {isAdminUser && (
+                        <td className="py-3.5 px-4 text-center">
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button
+                              onClick={() => openEditModal(item)}
+                              className="p-1.5 rounded-lg text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 cursor-pointer"
+                              title="Edit Akun & Password"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => setDeleteTarget(item)}
+                              disabled={Boolean(isSelf)}
+                              className="p-1.5 rounded-lg text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                              title={isSelf ? 'Tidak dapat menghapus akun yang sedang aktif' : 'Hapus dari Master Login'}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
@@ -459,7 +520,7 @@ export const MasterLogin: React.FC<MasterLoginProps> = ({
       )}
 
       {/* Add / Edit Modal */}
-      {isModalOpen && (
+      {isModalOpen && isAdminUser && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl relative border border-slate-200 max-h-[92vh] overflow-y-auto">
             <button
@@ -475,7 +536,7 @@ export const MasterLogin: React.FC<MasterLoginProps> = ({
             </h3>
             <p className="text-xs text-slate-500 mb-4">
               {editingRecord
-                ? 'Perbarui nama lengkap, peran hak akses, atau status akun pengurus.'
+                ? 'Perbarui data pengurus atau tetapkan password baru untuk akun ini.'
                 : 'Buat ID Login dan password baru untuk pengurus agar dapat masuk ke aplikasi.'}
             </p>
 
@@ -488,7 +549,7 @@ export const MasterLogin: React.FC<MasterLoginProps> = ({
 
             <form onSubmit={handleSubmit} className="space-y-3.5 text-xs">
               <div>
-                <label className="block font-bold text-slate-700 mb-1">ID Login / Email *</label>
+                <label className="block font-bold text-slate-700 mb-1">ID Login *</label>
                 <input
                   type="text"
                   required
@@ -498,36 +559,40 @@ export const MasterLogin: React.FC<MasterLoginProps> = ({
                   onChange={(e) => setFormLoginId(e.target.value)}
                   className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-mono font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600 disabled:opacity-60"
                 />
-                {!editingRecord && formLoginId.trim() && (
-                  <p className="text-[11px] text-slate-500 mt-1">
-                    Email sistem: <span className="font-mono">{buildLoginEmail(formLoginId)}</span>
+                {!editingRecord && (
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Hanya ID Login (tanpa email), contoh: <span className="font-mono">bendahara</span>, <span className="font-mono">ketua1</span>.
                   </p>
                 )}
               </div>
 
-              {!editingRecord && (
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Password *</label>
-                  <div className="relative">
-                    <input
-                      type={showPassword ? 'text' : 'password'}
-                      required
-                      minLength={6}
-                      placeholder="Minimal 6 karakter"
-                      value={formPassword}
-                      onChange={(e) => setFormPassword(e.target.value)}
-                      className="w-full pl-3 pr-9 py-2 bg-slate-50 border border-slate-300 rounded-xl font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 cursor-pointer"
-                    >
-                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">
+                  {editingRecord ? 'Password Baru (Opsional)' : 'Password *'}
+                </label>
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    required={!editingRecord}
+                    minLength={editingRecord && !formPassword ? undefined : 6}
+                    placeholder={
+                      editingRecord
+                        ? 'Kosongkan jika tidak ingin mengubah password'
+                        : 'Minimal 6 karakter'
+                    }
+                    value={formPassword}
+                    onChange={(e) => setFormPassword(e.target.value)}
+                    className="w-full pl-3 pr-9 py-2 bg-slate-50 border border-slate-300 rounded-xl font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 cursor-pointer"
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
                 </div>
-              )}
+              </div>
 
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Nama Lengkap Pengurus *</label>
@@ -546,8 +611,9 @@ export const MasterLogin: React.FC<MasterLoginProps> = ({
                   <label className="block font-bold text-slate-700 mb-1">Peran / Hak Akses</label>
                   <select
                     value={formPeran}
+                    disabled={Boolean(editingRecord && isCurrentUserRecord(editingRecord))}
                     onChange={(e) => setFormPeran(e.target.value as MasterLoginRole)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-600 disabled:opacity-60"
                   >
                     {ROLES.map((r) => (
                       <option key={r} value={r}>
@@ -604,7 +670,7 @@ export const MasterLogin: React.FC<MasterLoginProps> = ({
       )}
 
       {/* Delete Confirmation Modal */}
-      {deleteTarget && (
+      {deleteTarget && isAdminUser && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
           <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl relative border border-slate-100">
             <button
@@ -619,7 +685,7 @@ export const MasterLogin: React.FC<MasterLoginProps> = ({
               </div>
               <div>
                 <h3 className="text-base font-bold text-slate-900 font-serif">Hapus Akun dari Master Login?</h3>
-                <p className="text-[11px] text-slate-500">Data akun akan dihapus dari daftar master</p>
+                <p className="text-[11px] text-slate-500">Akun dan password akan dihapus permanen</p>
               </div>
             </div>
             <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80 text-xs text-slate-700 my-4 space-y-1">
@@ -635,7 +701,7 @@ export const MasterLogin: React.FC<MasterLoginProps> = ({
               </button>
               <button
                 onClick={async () => {
-                  await onDeleteLogin(deleteTarget.id);
+                  await onDeleteLogin(deleteTarget);
                   setDeleteTarget(null);
                 }}
                 className="px-4 py-2 text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white rounded-xl cursor-pointer"

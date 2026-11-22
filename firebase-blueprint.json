@@ -107,20 +107,33 @@
     },
     "masterLogins": {
       "title": "MasterLogins",
-      "description": "Master data akun login pengurus majelis taklim",
+      "description": "Master data akun login pengurus majelis taklim (tanpa email)",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
-        "uid": { "type": "string" },
         "loginId": { "type": "string" },
-        "email": { "type": "string" },
         "namaLengkap": { "type": "string" },
         "peran": { "type": "string", "enum": ["Admin", "Ketua", "Bendahara", "Pengurus"] },
         "statusAktif": { "type": "string", "enum": ["aktif", "nonaktif"] },
+        "hasPassword": { "type": "boolean" },
         "catatan": { "type": "string" },
         "createdAt": { "type": "number" }
       },
-      "required": ["id", "loginId", "email", "namaLengkap", "peran", "statusAktif", "createdAt"]
+      "required": ["id", "loginId", "namaLengkap", "peran", "statusAktif", "createdAt"]
+    },
+    "loginCredentials": {
+      "title": "LoginCredentials",
+      "description": "Hash password PBKDF2-SHA256 untuk autentikasi ID & Password",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "loginDocId": { "type": "string" },
+        "loginId": { "type": "string" },
+        "passwordHash": { "type": "string" },
+        "passwordSalt": { "type": "string" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["id", "loginDocId", "loginId", "passwordHash", "passwordSalt", "updatedAt"]
     }
   },
   "firestore": {
@@ -151,6 +164,10 @@
     "/masterLogins/{loginDocId}": {
       "schema": { "$ref": "#/entities/masterLogins" },
       "description": "Master data akun login ID dan hak akses pengurus"
+    },
+    "/loginCredentials/{credId}": {
+      "schema": { "$ref": "#/entities/loginCredentials" },
+      "description": "Penyimpanan hash password terenkripsi per ID Login"
     }
   }
 }

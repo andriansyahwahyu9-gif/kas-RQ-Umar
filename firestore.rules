@@ -8,12 +8,12 @@ service cloud.firestore {
     }
 
     // === GLOBAL HELPERS ===
-    function isSignedIn() {
-      return request.auth != null;
-    }
-
     function isValidId(id) {
       return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidLoginKey(id) {
+      return id is string && id.size() >= 2 && id.size() <= 50 && !(id in ['.', '..']) && id.matches('^[a-z0-9._\\-]+$');
     }
 
     function incoming() {
@@ -234,7 +234,6 @@ service cloud.firestore {
       return data.keys().hasAll([
         'id',
         'loginId',
-        'email',
         'namaLengkap',
         'peran',
         'statusAktif',
@@ -242,35 +241,58 @@ service cloud.firestore {
       ]) &&
       data.keys().hasOnly([
         'id',
-        'uid',
         'loginId',
-        'email',
         'namaLengkap',
         'peran',
         'statusAktif',
+        'hasPassword',
         'catatan',
         'createdAt'
       ]) &&
       data.id is string && data.id == docId &&
-      isOptStr(data, 'uid', 128) &&
-      data.loginId is string && data.loginId.size() >= 1 && data.loginId.size() <= 150 &&
-      data.email is string && data.email.size() >= 3 && data.email.size() <= 200 &&
+      data.loginId is string && data.loginId.size() >= 2 && data.loginId.size() <= 50 &&
       data.namaLengkap is string && data.namaLengkap.size() >= 1 && data.namaLengkap.size() <= 150 &&
       data.peran in ['Admin', 'Ketua', 'Bendahara', 'Pengurus'] &&
       data.statusAktif in ['aktif', 'nonaktif'] &&
+      isOptBool(data, 'hasPassword') &&
       isOptStr(data, 'catatan', 500) &&
       data.createdAt is number;
     }
 
+    function isValidLoginCredential(data, credId) {
+      return data.keys().hasAll([
+        'id',
+        'loginDocId',
+        'loginId',
+        'passwordHash',
+        'passwordSalt',
+        'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id',
+        'loginDocId',
+        'loginId',
+        'passwordHash',
+        'passwordSalt',
+        'updatedAt'
+      ]) &&
+      data.id is string && data.id == credId &&
+      data.loginDocId is string && data.loginDocId.size() >= 1 && data.loginDocId.size() <= 128 &&
+      data.loginId is string && data.loginId.size() >= 2 && data.loginId.size() <= 50 &&
+      data.passwordHash is string && data.passwordHash.size() == 64 &&
+      data.passwordSalt is string && data.passwordSalt.size() == 32 &&
+      data.updatedAt is number;
+    }
+
     // === COLLECTION RULES ===
     match /test/{docId} {
-      allow get: if isSignedIn() && docId == 'connection';
+      allow get: if docId == 'connection';
     }
 
     match /config/{configId} {
-      allow get: if isSignedIn() && isValidId(configId);
-      allow create: if isSignedIn() && isValidId(configId) && isValidConfig(incoming());
-      allow update: if isSignedIn() && isValidId(configId) && isValidConfig(incoming()) &&
+      allow get: if isValidId(configId);
+      allow create: if isValidId(configId) && isValidConfig(incoming());
+      allow update: if isValidId(configId) && isValidConfig(incoming()) &&
         incoming().diff(existing()).affectedKeys().hasOnly([
           'namaMajelis',
           'alamatMajelis',
@@ -288,10 +310,10 @@ service cloud.firestore {
     }
 
     match /transactions/{transactionId} {
-      allow get: if isSignedIn() && isValidId(transactionId);
-      allow list: if isSignedIn();
-      allow create: if isSignedIn() && isValidId(transactionId) && isValidTransaction(incoming(), transactionId);
-      allow update: if isSignedIn() && isValidId(transactionId) && isValidTransaction(incoming(), transactionId) &&
+      allow get: if isValidId(transactionId);
+      allow list: if true;
+      allow create: if isValidId(transactionId) && isValidTransaction(incoming(), transactionId);
+      allow update: if isValidId(transactionId) && isValidTransaction(incoming(), transactionId) &&
         incoming().id == existing().id &&
         incoming().createdAt == existing().createdAt &&
         incoming().diff(existing()).affectedKeys().hasOnly([
@@ -303,14 +325,14 @@ service cloud.firestore {
           'pembayarAtauPenerima',
           'metode'
         ]);
-      allow delete: if isSignedIn() && isValidId(transactionId);
+      allow delete: if isValidId(transactionId);
     }
 
     match /members/{memberId} {
-      allow get: if isSignedIn() && isValidId(memberId);
-      allow list: if isSignedIn();
-      allow create: if isSignedIn() && isValidId(memberId) && isValidMember(incoming(), memberId);
-      allow update: if isSignedIn() && isValidId(memberId) && isValidMember(incoming(), memberId) &&
+      allow get: if isValidId(memberId);
+      allow list: if true;
+      allow create: if isValidId(memberId) && isValidMember(incoming(), memberId);
+      allow update: if isValidId(memberId) && isValidMember(incoming(), memberId) &&
         incoming().id == existing().id &&
         incoming().diff(existing()).affectedKeys().hasOnly([
           'kodeAnggota',
@@ -324,14 +346,14 @@ service cloud.firestore {
           'statusAktif',
           'catatan'
         ]);
-      allow delete: if isSignedIn() && isValidId(memberId);
+      allow delete: if isValidId(memberId);
     }
 
     match /duesRecords/{duesId} {
-      allow get: if isSignedIn() && isValidId(duesId);
-      allow list: if isSignedIn();
-      allow create: if isSignedIn() && isValidId(duesId) && isValidDuesRecord(incoming(), duesId);
-      allow update: if isSignedIn() && isValidId(duesId) && isValidDuesRecord(incoming(), duesId) &&
+      allow get: if isValidId(duesId);
+      allow list: if true;
+      allow create: if isValidId(duesId) && isValidDuesRecord(incoming(), duesId);
+      allow update: if isValidId(duesId) && isValidDuesRecord(incoming(), duesId) &&
         incoming().id == existing().id &&
         incoming().diff(existing()).affectedKeys().hasOnly([
           'memberId',
@@ -340,14 +362,14 @@ service cloud.firestore {
           'nominal',
           'catatan'
         ]);
-      allow delete: if isSignedIn() && isValidId(duesId);
+      allow delete: if isValidId(duesId);
     }
 
     match /weeklyDuties/{dutyId} {
-      allow get: if isSignedIn() && isValidId(dutyId);
-      allow list: if isSignedIn();
-      allow create: if isSignedIn() && isValidId(dutyId) && isValidWeeklyDuty(incoming(), dutyId);
-      allow update: if isSignedIn() && isValidId(dutyId) && isValidWeeklyDuty(incoming(), dutyId) &&
+      allow get: if isValidId(dutyId);
+      allow list: if true;
+      allow create: if isValidId(dutyId) && isValidWeeklyDuty(incoming(), dutyId);
+      allow update: if isValidId(dutyId) && isValidWeeklyDuty(incoming(), dutyId) &&
         incoming().id == existing().id &&
         incoming().createdAt == existing().createdAt &&
         incoming().diff(existing()).affectedKeys().hasOnly([
@@ -363,14 +385,14 @@ service cloud.firestore {
           'status',
           'catatan'
         ]);
-      allow delete: if isSignedIn() && isValidId(dutyId);
+      allow delete: if isValidId(dutyId);
     }
 
     match /hafalanRecords/{hafalanId} {
-      allow get: if isSignedIn() && isValidId(hafalanId);
-      allow list: if isSignedIn();
-      allow create: if isSignedIn() && isValidId(hafalanId) && isValidHafalanRecord(incoming(), hafalanId);
-      allow update: if isSignedIn() && isValidId(hafalanId) && isValidHafalanRecord(incoming(), hafalanId) &&
+      allow get: if isValidId(hafalanId);
+      allow list: if true;
+      allow create: if isValidId(hafalanId) && isValidHafalanRecord(incoming(), hafalanId);
+      allow update: if isValidId(hafalanId) && isValidHafalanRecord(incoming(), hafalanId) &&
         incoming().id == existing().id &&
         incoming().createdAt == existing().createdAt &&
         incoming().diff(existing()).affectedKeys().hasOnly([
@@ -386,26 +408,34 @@ service cloud.firestore {
           'penyimak',
           'catatan'
         ]);
-      allow delete: if isSignedIn() && isValidId(hafalanId);
+      allow delete: if isValidId(hafalanId);
     }
 
     match /masterLogins/{loginDocId} {
-      allow get: if isSignedIn() && isValidId(loginDocId);
-      allow list: if isSignedIn();
-      allow create: if isSignedIn() && isValidId(loginDocId) && isValidMasterLogin(incoming(), loginDocId);
-      allow update: if isSignedIn() && isValidId(loginDocId) && isValidMasterLogin(incoming(), loginDocId) &&
+      allow get: if isValidId(loginDocId);
+      allow list: if true;
+      allow create: if isValidId(loginDocId) && isValidMasterLogin(incoming(), loginDocId);
+      allow update: if isValidId(loginDocId) && isValidMasterLogin(incoming(), loginDocId) &&
         incoming().id == existing().id &&
         incoming().createdAt == existing().createdAt &&
         incoming().diff(existing()).affectedKeys().hasOnly([
-          'uid',
-          'loginId',
-          'email',
           'namaLengkap',
           'peran',
           'statusAktif',
-          'catatan'
+          'hasPassword',
+          'catatan',
+          'email',
+          'uid',
+          'authSynced'
         ]);
-      allow delete: if isSignedIn() && isValidId(loginDocId);
+      allow delete: if isValidId(loginDocId);
+    }
+
+    match /loginCredentials/{credId} {
+      allow get: if isValidLoginKey(credId);
+      allow list: if false;
+      allow create, update: if isValidLoginKey(credId) && isValidLoginCredential(incoming(), credId);
+      allow delete: if isValidLoginKey(credId);
     }
   }
 }

@@ -128,12 +128,18 @@ export type MasterLoginRole = 'Admin' | 'Ketua' | 'Bendahara' | 'Pengurus';
 
 export interface MasterLoginRecord {
   id: string;
-  uid?: string;
   loginId: string;
-  email: string;
   namaLengkap: string;
   peran: MasterLoginRole;
   statusAktif: MemberActiveStatus;
+  hasPassword?: boolean;
   catatan?: string;
   createdAt: number;
+}
+
+export interface AppSessionUser {
+  id: string;
+  loginId: string;
+  namaLengkap: string;
+  peran: MasterLoginRole;
 }

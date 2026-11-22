@@ -1,5 +1,4 @@
 import React from 'react';
-import { User } from 'firebase/auth';
 import {
   BookOpen,
   LayoutDashboard,
@@ -16,13 +15,13 @@ import {
   LogOut,
   KeyRound,
 } from 'lucide-react';
-import { PengajianConfig } from '../types';
+import { AppSessionUser, PengajianConfig } from '../types';
 
 interface NavbarProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
   config: PengajianConfig;
-  user: User;
+  user: AppSessionUser;
   onSignOut: () => void;
   onOpenIncomeModal: () => void;
   onOpenExpenseModal: () => void;
@@ -49,7 +48,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     { id: 'master-login', label: 'Master Login', icon: KeyRound },
   ];
 
-  const userInitial = (user.displayName || user.email || 'P').charAt(0).toUpperCase();
+  const userInitial = (user.namaLengkap || user.loginId || 'P').charAt(0).toUpperCase();
 
   return (
     <header className="print:hidden bg-emerald-900 text-white shadow-lg sticky top-0 z-30 border-b border-emerald-800">
@@ -105,23 +104,16 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
 
             <div className="flex items-center gap-2 pl-2 ml-1 border-l border-emerald-800">
-              {user.photoURL ? (
-                <img
-                  src={user.photoURL}
-                  alt={user.displayName || 'Pengurus'}
-                  className="w-8 h-8 rounded-full border border-emerald-700 object-cover shrink-0"
-                  referrerPolicy="no-referrer"
-                />
-              ) : (
-                <div className="w-8 h-8 rounded-full bg-emerald-800 border border-emerald-700 flex items-center justify-center text-xs font-bold text-amber-200 shrink-0">
-                  {userInitial}
-                </div>
-              )}
-              <div className="hidden xl:block text-left max-w-[140px]">
+              <div className="w-8 h-8 rounded-full bg-emerald-800 border border-emerald-700 flex items-center justify-center text-xs font-bold text-amber-200 shrink-0">
+                {userInitial}
+              </div>
+              <div className="hidden xl:block text-left max-w-[150px]">
                 <p className="text-xs font-semibold text-white truncate">
-                  {user.displayName || 'Pengurus'}
+                  {user.namaLengkap}
                 </p>
-                <p className="text-[10px] text-emerald-200/80 truncate">{user.email}</p>
+                <p className="text-[10px] text-emerald-200/80 truncate font-mono">
+                  ID: {user.loginId} · {user.peran}
+                </p>
               </div>
               <button
                 onClick={onSignOut}

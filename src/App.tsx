@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { onAuthStateChanged, signOut, User } from 'firebase/auth';
-import { auth, testConnection } from './lib/firebase';
+import { testConnection } from './lib/firebase';
 import { Navbar } from './components/Navbar';
 import { SummaryCards } from './components/SummaryCards';
 import { TransactionTable } from './components/TransactionTable';
@@ -24,6 +23,7 @@ import {
   WeeklyDuty,
   HafalanRecord,
   MasterLoginRecord,
+  AppSessionUser,
 } from './types';
 import { DEFAULT_CONFIG } from './data/initialData';
 import { exportDataToJSON, formatRupiah, formatDateIndo } from './utils/formatters';
@@ -68,10 +68,11 @@ import {
 } from './services/kasService';
 
 export default function App() {
-  // Auth State
-  const [authReady, setAuthReady] = useState<boolean>(false);
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  // Auth State (ID & Password only, in-memory session)
+  const [currentUser, setCurrentUser] = useState<AppSessionUser | null>(null);
   const [authNotice, setAuthNotice] = useState<string | null>(null);
+  const [rememberedLoginId, setRememberedLoginId] = useState<string>('');
+  const [rememberLoginPref, setRememberLoginPref] = useState<boolean>(true);
 
   // Config State
   const [config, setConfig] = useState<PengajianConfig>(DEFAULT_CONFIG);
@@ -104,18 +105,9 @@ export default function App() {
   const [editingTrx, setEditingTrx] = useState<Transaction | null>(null);
   const [dashboardDeleteTrx, setDashboardDeleteTrx] = useState<Transaction | null>(null);
 
-  // Listen to Firebase Auth state
+  // Subscribe to Realtime Firestore Synchronization when authenticated
   useEffect(() => {
-    const unsubAuth = onAuthStateChanged(auth, (user) => {
-      setCurrentUser(user);
-      setAuthReady(true);
-    });
-    return () => unsubAuth();
-  }, []);
-
-  // Subscribe to Realtime Firestore Synchronization ONLY when authenticated
-  useEffect(() => {
-    if (!authReady || !currentUser) {
+    if (!currentUser) {
       setTransactions([]);
       setMembers([]);
       setDuesRecords([]);
@@ -148,49 +140,42 @@ export default function App() {
       unsubHafalan();
       unsubMasterLogins();
     };
-  }, [authReady, currentUser]);
+  }, [currentUser?.id]);
 
-  // Enforce active Master Login status & auto-register signed-in user in Master Login
+  // Enforce active Master Login status & sync profile updates in real-time
   useEffect(() => {
-    if (!authReady || !currentUser || !masterLoginsLoaded) return;
+    if (!currentUser || !masterLoginsLoaded) return;
 
-    const userEmail = (currentUser.email || '').toLowerCase();
-    const matched = masterLogins.find(
-      (l) =>
-        (l.uid && l.uid === currentUser.uid) ||
-        (userEmail && l.email.toLowerCase() === userEmail)
-    );
-
-    if (matched) {
-      if (matched.statusAktif === 'nonaktif') {
-        setAuthNotice(
-          'Akun Anda berstatus Non-Aktif pada Master Login. Silakan hubungi Admin/Ketua Majelis.'
-        );
-        signOut(auth);
-      } else {
-        setAuthNotice(null);
-      }
+    const matched = masterLogins.find((l) => l.id === currentUser.id);
+    if (!matched) {
+      setAuthNotice('Akun Anda telah dihapus dari Master Login oleh Admin.');
+      setCurrentUser(null);
       return;
     }
 
-    const derivedLoginId = userEmail.endsWith('@kas-pengajian.app')
-      ? userEmail.replace('@kas-pengajian.app', '')
-      : currentUser.email || currentUser.uid;
+    if (matched.statusAktif === 'nonaktif') {
+      setAuthNotice(
+        'Akun Anda berstatus Non-Aktif pada Master Login. Silakan hubungi Admin Majelis.'
+      );
+      setCurrentUser(null);
+      return;
+    }
 
-    const autoRecord: MasterLoginRecord = {
-      id: `login-${currentUser.uid}`,
-      uid: currentUser.uid,
-      loginId: derivedLoginId,
-      email: currentUser.email || `${currentUser.uid}@kas-pengajian.app`,
-      namaLengkap: currentUser.displayName || derivedLoginId,
-      peran: masterLogins.length === 0 ? 'Admin' : 'Pengurus',
-      statusAktif: 'aktif',
-      createdAt: Date.now(),
-    };
-    saveMasterLogin(autoRecord).catch((err) =>
-      console.error('Auto-register master login failed:', err)
-    );
-  }, [authReady, currentUser, masterLoginsLoaded, masterLogins]);
+    if (
+      matched.namaLengkap !== currentUser.namaLengkap ||
+      matched.peran !== currentUser.peran
+    ) {
+      setCurrentUser((prev) =>
+        prev
+          ? {
+              ...prev,
+              namaLengkap: matched.namaLengkap,
+              peran: matched.peran,
+            }
+          : null
+      );
+    }
+  }, [currentUser, masterLoginsLoaded, masterLogins]);
 
   // Calculations
   const totalIncome = useMemo(() => {
@@ -313,17 +298,21 @@ export default function App() {
   };
 
   // Master Login Handlers
-  const handleSaveMasterLogin = async (record: MasterLoginRecord) => {
-    await saveMasterLogin(record);
+  const handleSaveMasterLogin = async (record: MasterLoginRecord, newPassword?: string) => {
+    await saveMasterLogin(record, newPassword);
   };
 
-  const handleDeleteMasterLogin = async (id: string) => {
-    await deleteMasterLogin(id);
+  const handleDeleteMasterLogin = async (record: MasterLoginRecord) => {
+    await deleteMasterLogin(record);
   };
 
-  const handleSignOut = async () => {
+  const handleSignOut = () => {
     setAuthNotice(null);
-    await signOut(auth);
+    if (!rememberLoginPref) {
+      setRememberedLoginId('');
+    }
+    setCurrentUser(null);
+    setActiveTab('dashboard');
   };
 
   // Upcoming or latest weekly duty for Dashboard preview
@@ -361,19 +350,20 @@ export default function App() {
     await resetDataToDefault();
   };
 
-  if (!authReady) {
-    return (
-      <div className="min-h-screen bg-slate-100 flex items-center justify-center p-6">
-        <div className="bg-white rounded-2xl px-8 py-6 shadow-sm border border-slate-200 text-center space-y-2">
-          <div className="w-9 h-9 rounded-full border-2 border-emerald-700 border-t-transparent animate-spin mx-auto" />
-          <p className="text-xs font-semibold text-slate-600">Memuat sesi pengguna...</p>
-        </div>
-      </div>
-    );
-  }
-
   if (!currentUser) {
-    return <LoginScreen authNotice={authNotice} />;
+    return (
+      <LoginScreen
+        authNotice={authNotice}
+        initialLoginId={rememberedLoginId}
+        initialRememberMe={rememberLoginPref}
+        onLoginSuccess={(user, rememberId) => {
+          setAuthNotice(null);
+          setRememberLoginPref(rememberId);
+          setRememberedLoginId(rememberId ? user.loginId : '');
+          setCurrentUser(user);
+        }}
+      />
+    );
   }
 
   return (
@@ -702,8 +692,7 @@ export default function App() {
         {activeTab === 'master-login' && (
           <MasterLogin
             logins={masterLogins}
-            currentUserEmail={currentUser.email}
-            currentUserUid={currentUser.uid}
+            currentUser={currentUser}
             onSaveLogin={handleSaveMasterLogin}
             onDeleteLogin={handleDeleteMasterLogin}
           />
